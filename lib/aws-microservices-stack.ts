@@ -1,62 +1,20 @@
-import { RemovalPolicy, Stack, StackProps } from "aws-cdk-lib";
-import { LambdaRestApi } from "aws-cdk-lib/aws-apigateway";
-import { AttributeType, BillingMode, Table } from "aws-cdk-lib/aws-dynamodb";
-import { Runtime } from "aws-cdk-lib/aws-lambda";
-import {
-  NodejsFunction,
-  NodejsFunctionProps,
-} from "aws-cdk-lib/aws-lambda-nodejs";
+import { Stack, StackProps } from "aws-cdk-lib";
 import { Construct } from "constructs";
-import { join } from "path";
+import { SwnDatabase } from "./database";
+import { SwnApiGateway } from "./gateway";
+import { SwnMicroservices } from "./microservice";
 
 export class AwsMicroservicesStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
+    const database = new SwnDatabase(this, "Database");
 
-    const productTable = new Table(this, "product", {
-      partitionKey: {
-        name: "id",
-        type: AttributeType.STRING,
-      },
-      tableName: "product",
-      removalPolicy: RemovalPolicy.DESTROY,
-      billingMode: BillingMode.PAY_PER_REQUEST,
+    const microservices = new SwnMicroservices(this, "Microservices", {
+      productTable: database.productTable,
     });
 
-    const nodeJsFunctionProps: NodejsFunctionProps = {
-      bundling: {
-        externalModules: ["aws-sdk"],
-      },
-      environment: {
-        PRIMARY_KEY: "id",
-        DYNAMODB_TABLE_NAME: productTable.tableName,
-      },
-      runtime: Runtime.NODEJS_16_X,
-    };
-
-    // Product microservice Lambda Function
-    const productFunction = new NodejsFunction(this, "productLambdaFunction", {
-      entry: join(__dirname, "/../src/product/index.js"),
-      ...nodeJsFunctionProps,
+    const apiGateway = new SwnApiGateway(this, "ApiGateway", {
+      productMicroservice: microservices.productMicroservice,
     });
-
-    productTable.grantReadWriteData(productFunction);
-
-    // API Gateway for product microservice
-
-    const apiGateway = new LambdaRestApi(this, "productApi", {
-      restApiName: "Product Service",
-      handler: productFunction,
-      proxy: false,
-    });
-
-    const product = apiGateway.root.addResource("product");
-    product.addMethod("GET"); // GET /product
-    product.addMethod("POST"); // POST /product
-
-    const singleProduct = product.addResource("{id}"); // product/{id}
-    singleProduct.addMethod("GET"); // GET /product/{id}
-    singleProduct.addMethod("PUT"); // PUT /product/{id}
-    singleProduct.addMethod("DELETE"); // DELETE /product/{id}
   }
 }
